@@ -3,6 +3,29 @@
 Created on Tue Oct 06 18:44:49 2015
 
 @author: Igor Stankevich, loknar@list.ru
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Igor Stankevich, loknar@list.ru
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE
+
 """
 import logging, threading, time, importlib, os, cPickle, math, ctypes
 import numpy as np
@@ -99,9 +122,7 @@ class Blender(object):
         self.parallel_classifiers = ['RandomForestClassifier', 'ExtraTreesClassifier']
         
     def __init_blend(self, init_value):
-        #if self.evaluator.count_saved_classifiers() > 0:
         return None, None
-        #return self.evaluator.predictors_data(self.X_major_train), self.evaluator.predictors_data(self.X_major_test)
 
     def __init_blend_old(self, init_value):
         '''
@@ -361,7 +382,7 @@ class Blender(object):
             if time_passed % divider != 0:
                 informed = False
             time.sleep(0.5)
-        # pausing to correctly display everything from processes
+        # pausing to correctly display everything from processes on windows
         time.sleep(1)
 
     def check_classifier_result(self, train_X, test_X, trained_clfs):
