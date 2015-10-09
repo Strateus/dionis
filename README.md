@@ -18,8 +18,7 @@ Usage:
   	
   	blender = Blender(X, y, save_path = 'save/')
 
-At start blender will split X and y to Master train and test sets. <b>Master train set</b> will be used for cross-validation training
-of all predictors, <b>Master test set</b> will be used to train blender itself.
+At start blender will split X and y to Major train and test sets. <b>Major train set</b> will be used for cross-validation training of all predictors, <b>Major test set</b> will be used to train blender itself.
 
 	blender.run()
 
