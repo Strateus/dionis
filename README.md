@@ -4,7 +4,7 @@ Only predictors who help to raise final blender AUC score on test set are select
 
 This package can be used for example for Kaggle competitions.
 
-Prerequisites:
+Dependencies:
 
 	numpy, scikit-learn, scipy
 
