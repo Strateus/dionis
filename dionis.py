@@ -29,6 +29,7 @@ SOFTWARE
 """
 import logging, threading, time, importlib, os, cPickle, math, ctypes
 import numpy as np
+import pandas as pd
 from hashlib import sha1
 from sklearn.cross_validation import StratifiedKFold, train_test_split
 from sklearn.externals import joblib
@@ -119,7 +120,7 @@ class Blender(object):
         # setting up folds for classifier training
         self.blended_train_X, self.blended_test_X = self.__init_blend(init_value)
         # adding classifiers who has parallel mode
-        self.parallel_classifiers = ['RandomForestClassifier', 'ExtraTreesClassifier']
+        self.parallel_classifiers = ['RandomForestClassifier', 'ExtraTreesClassifier', 'XGBClassifier']
         
     def __init_blend(self, init_value):
         return None, None
@@ -181,7 +182,8 @@ class Blender(object):
             if arg == 'max_features' and type(value) == int and self.X.shape[1] < value and clf['clf'] != 'GradientBoostingClassifier':
                 value = self.X.shape[1]
             # correcting subsample for GB classifier
-            if clf['clf'] == 'GradientBoostingClassifier' and arg == 'subsample' and value > 1.0:
+            if (clf['clf'] == 'GradientBoostingClassifier' or clf['clf'] == 'XGBClassifier')\
+            and (arg == 'subsample' or arg == 'colsample_bytree') and value > 1.0:
                 value = 1.0
             kwargs[arg] = value
         # if classifier does not have parallel mode, returning True forcing Blender to run in parallel mode
@@ -211,7 +213,7 @@ class Blender(object):
                  'clf': 'RandomForestClassifier',
                  'weight': 8.,
                  'kwargs': {
-                            "n_estimators": randint(20, 300),
+                            "n_estimators": randint(2000, 10000),
                             "criterion": ["gini", "entropy"],
                             "max_features": ['auto'],
                             "max_depth": [None],
@@ -222,11 +224,27 @@ class Blender(object):
                            }
                 },
                 {
+                 'lib': 'xgboost',
+                 'clf': 'XGBClassifier',
+                 'weight': 24.,
+                 'kwargs': {
+                            "max_depth": randint(10, 25),
+                            "learning_rate": uniform(loc = 0.005, scale = 0.2),
+                            "n_estimators": randint(4000, 15000),
+                            #"gamma": uniform(loc = 0., scale = 0.2),
+                            "subsample": uniform(loc = 0.4, scale = 0.8),
+                            "colsample_bytree": uniform(loc = 0.4, scale = 0.8),
+                            "seed": randint(1, 10000),
+                            "min_child_weight": [3],
+                            "silent": [True],
+                           }
+                },
+                {
                  'lib': 'sklearn.ensemble',
                  'clf': 'ExtraTreesClassifier',
                  'weight': 8.,
                  'kwargs': {
-                            "n_estimators": randint(20, 300),
+                            "n_estimators": randint(2000, 10000),
                             "criterion": ["gini", "entropy"],
                             "max_features": ['auto'],
                             "max_depth": [None],
@@ -277,6 +295,18 @@ class Blender(object):
             self.logger('info', 'main worker', 'main thread finished')
         self.thread = threading.Thread(target = worker)
         self.thread.start()
+        
+    def train_clfs(self, clfs):
+        '''
+        method uses supplied classifiers to use in blender
+        classifiers should have following methods:
+            fit - to train classifier, 
+            predict - to predict classes,
+            predict_proba - to predict probabilities of classes
+        '''
+        self.folds = list(StratifiedKFold(self.y_major_train, 5, shuffle=True))
+        for clf in clfs:
+            self.blend(clf)
     
     def stop(self):
         self.running = False
@@ -423,17 +453,24 @@ def form_blend_data(X_major_train, X_major_test, y_major_train, folds, clf, verb
     scores, aucs, clfs = [], [], []
     blend_train_X = np.zeros(X_major_train.shape[0])
     blend_test_X = np.zeros((X_major_test.shape[0], len(folds)))
-    for j, (train_indexes, test_indexes) in enumerate(folds):
-        X_train = X_major_train[train_indexes]
-        y_train = y_major_train[train_indexes]
-        X_test = X_major_train[test_indexes]
-        y_test = y_major_train[test_indexes]
+    # if XGB - suppling matrix, doesnt accept pandas with not alphanumeric feature names
+    if clf.__class__.__name__ == 'XGBClassifier' and isinstance(X_major_train, pd.DataFrame):
+        X_major_train, X_major_test = X_major_train.as_matrix(), X_major_test.as_matrix()
+    for j, (tri, cvi) in enumerate(folds):
+        if isinstance(X_major_train, pd.DataFrame):
+            X_train, X_test = X_major_train.iloc[tri], X_major_train.iloc[cvi]
+        else:
+            X_train, X_test = X_major_train[tri], X_major_train[cvi]
+        y_train, y_test = y_major_train[tri], y_major_train[cvi]
         # cloning bulk classifier
         clf_ = clone(clf)
         # training classifier on train indexes from Major train set
         clf_.fit(X_train, y_train)
+        if verbose:
+            if not clf.__class__.__name__ == 'XGBClassifier' and isinstance(X_train, pd.DataFrame):
+                print 'Top 10 features: %s' % str(X_train.columns[np.argsort(clf_.feature_importances_)[::-1][:10]].format())
         # predicting on test indexes from Major train set, asssigning predicted values in folds for blend training
-        blend_train_X[test_indexes] = clf_.predict_proba(X_test)[:,1]
+        blend_train_X[cvi] = clf_.predict_proba(X_test)[:,1]
         # predicting with trained classifier on Major TEST set, 1 fold per column, to be averaged before return
         blend_test_X[:, j] = clf_.predict_proba(X_major_test)[:,1]
         # evaluating score of current classifier
@@ -478,6 +515,20 @@ class Evaluator(object):
             print 'Calculated score: %s' % str(score)
             print 'Calculated ROC AUC score: %s' % str(roc_auc_score)
         return predictions_prob if predict_probability else predictions
+        
+    def get_top_features(self, top = 10, clf_i = 0, top_features = {}):
+        group = self.pickler.load('classifiers_' + str(clf_i))
+        for i, clf in enumerate(group):
+            args = np.argsort(clf.feature_importances_)[-top:][::-1]
+            for arg in args:
+                if arg not in top_features:
+                    top_features[arg] = 1
+                else:
+                    top_features[arg] += 1
+        print 'Best features and occurences:'
+        print sorted(top_features.items(), key=lambda x: x[1], reverse = True)
+        return top_features
+            #print 'Top %s features: %s, args: %s' % (str(top), str(clf.feature_importances_[args]), str(args))
 
     def predictors_data(self, X):
         '''
